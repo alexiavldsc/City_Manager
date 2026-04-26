@@ -7,6 +7,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <dirent.h>
+#include <errno.h>
 typedef struct{
   float latitude;
   float longitude;
@@ -119,8 +121,8 @@ void log_action(const char* district_id, const char* role, const char* user, con
   sprintf(cale_fisier, "%s/logged_district", district_id);
   //struct stat status;
   if(!verify_permissions(cale_fisier, role, 0, 1)){
-    printf("Rolul '%s' nu are permisiune de scriere pe %s - actiunea nu va fi logata.\n", role, cale_fisier);
-    return; //inspectorul isi poate fac operatia
+    printf("Atentie! Rolul '%s' nu are permisiune de scriere pe %s. Actiunea nu va fi logata.\n", role, cale_fisier);
+    return; //inspectorul isi poate face operatia
   }
   int fd=open(cale_fisier, O_WRONLY | O_APPEND | O_CREAT, 0644);
   if(fd<0){
@@ -135,11 +137,12 @@ void log_action(const char* district_id, const char* role, const char* user, con
 }
 void create_director(const char* nume_director){
   if(mkdir(nume_director, 0750)<0){
-    perror("Eroare la crearea directorului. Poate exista deja.\n");
+    if(errno!=EEXIST){
+      perror("Eroare la crearea directorului.\n");
+      exit(1);
+    }
   }
-  else{
-    chmod(nume_director,0750);
-  }
+  chmod(nume_director,0750);
   char cale_fisier[256];
   sprintf(cale_fisier, "%s/reports.dat", nume_director);
   int fd_reports=open(cale_fisier, O_CREAT | O_RDWR | O_APPEND, 0664);
@@ -173,6 +176,10 @@ void create_director(const char* nume_director){
 }
 //functii cu AI - trebuie verificate/modificate
 int parse_condition(const char* input, char* field, char* op, char* value){
+  if(strlen(input)>=256){ //sa nu depasim dim buffer-ului
+    printf("Eroare! Prea lungi conditiile filtrului.\n");
+    return 0;
+  }
   //copiem inputul ca sa nu modificam originalul
   char buf[256];
   strncpy(buf, input, 255);
@@ -219,10 +226,70 @@ int match_condition(Report* r, const char* field, const char* op, const char* va
     if (strcmp(op, ">")  == 0) return r->timestamp >  val;
     if (strcmp(op, ">=") == 0) return r->timestamp >= val;
   }
+  else{
+    printf("Campul '%s' nu reprezinta un criteriu de filtrare.\n", field);
+  }
   return 0;
 }
-/*void add(){
-  }*/
+void add(const char* district_id, const char* role, const char* user){
+  char cale_fisier[256];
+  sprintf(cale_fisier, "%s/reports.dat", district_id);
+  struct stat status;
+  if(stat(district_id, &status)!=0){
+    create_director(district_id);
+  }
+  create_symlink(district_id);
+  check_symlink(district_id);
+  if(!verify_permissions(cale_fisier, role, 0, 1)){
+    printf("Eroare! Rolul '%s' nu are permisiuni de scriere pentru %s.\n", role, cale_fisier);
+    return;
+  }
+  chmod(cale_fisier, 0664);
+  int fd=open(cale_fisier, O_RDWR | O_APPEND);
+  if(fd<0){
+    perror("Eroare la deschiderea reports.dat");
+    exit(1);
+  }
+  //luam id-ul ultimului raport +1 si il consideram id-ul nou
+  struct stat fisier_status;
+  fstat(fd, &fisier_status);
+  int id_nou=1; //in caz ca e gol
+  if(fisier_status.st_size>0){
+    Report prev_report;
+    lseek(fd, -sizeof(Report), SEEK_END);
+    read(fd, &prev_report, sizeof(Report));
+    id_nou=prev_report.id+1;
+  }
+  Report report;
+  report.id=id_nou;
+  strncpy(report.inspector, user, sizeof(report.inspector)-1);
+  report.inspector[sizeof(report.inspector)-1]='\0';
+  report.timestamp=time(NULL);
+  printf("X: ");
+  scanf("%f", &report.coordinates.latitude);
+  printf("Y: ");
+  scanf("%f", &report.coordinates.longitude);
+  printf("Category (road/lighting/flooding/etc): ");
+  scanf("%9s", report.category);
+  int severity;
+  printf("Severity level (1/2/3): ");
+  scanf("%d", &severity);
+  report.level=(enum Severity_level)severity;
+  int c;
+  while((c=getchar())!='\n' && c!=EOF);
+  printf("Description: ");
+  fgets(report.description, sizeof(report.description), stdin);
+  report.description[strcspn(report.description, "\n")]=0; //eliminăm \n de la final
+  lseek(fd, 0, SEEK_END); //scriem la sfarsit
+  if(write(fd, &report, sizeof(Report)) != sizeof(Report)){
+    perror("Eroare la scrierea raportului");
+    exit(1);
+  }
+  else{
+    printf("Raport adaugat! ID: %d\n", id_nou);
+  }
+  close(fd);
+}
 void list(const char* district_id, const char* role){
   char cale_fisier[256];
   sprintf(cale_fisier, "%s/reports.dat", district_id);
@@ -284,16 +351,159 @@ void view(const char* district_id, const char* role, int target_id){
     }
   }
   if(!gasit){
-    printf("Raportul cu id-ul %d nu a fost gasit in %s.\n", target_id, district_id);
+    printf("Raportul cu ID-ul %d nu a fost gasit in %s.\n", target_id, district_id);
   }
   close(fd);
 }
-/*void remove_report(){
+void remove_report(const char* district_id, const char* role, int target_id){
+  char cale_fisier[256];
+  sprintf(cale_fisier, "%s/reports.dat", district_id);
+  if(strcmp(role, "manager")!=0){
+    printf("Eroare! Doar rolul 'manager' poate sterge rapoarte.\n");
+    return;
+  }
+  if(!verify_permissions(cale_fisier, role, 1, 1)){
+    printf("Eroare! Rolul '%s' nu are permisiuni rw pe %s.\n", role, cale_fisier);
+    exit(1);
+  }
+  int fd=open(cale_fisier, O_RDWR);
+  if(fd<0){
+    perror("Nu s-a putut deschide reports.dat pentru stergere");
+    exit(1);
+  }
+  struct stat status_inainte; //memoram dimensiunea initiala
+  fstat(fd, &status_inainte);
+  Report report;
+  int gasit=0;
+  off_t target_pos=0; //retinem la ce byte gasim raportul
+  while(read(fd, &report, sizeof(Report)) == sizeof(Report)){
+    if(report.id == target_id){
+      gasit=1; //l-am gasit, suntem cu o pozitie dupa
+      target_pos=lseek(fd, -sizeof(Report), SEEK_CUR); //ne mutam cu o pozitie inapoi
+      break;
+    }
+  }
+  if(!gasit){
+    printf("Raportul cu ID-ul %d nu a fost gasit.\n", target_id);
+    close(fd);
+    return;
+  }
+  //shiftam rapoartele
+  off_t read_pos=target_pos+sizeof(Report); //de unde citim (de după cel sters)
+  off_t write_pos=target_pos; //unde scriem (peste raportul sters)
+  lseek(fd, read_pos, SEEK_SET); //citim urmatorul
+  while(read(fd, &report, sizeof(Report)) == sizeof(Report)){
+    read_pos=lseek(fd, 0, SEEK_CUR); //salvam pozitia
+    lseek(fd, write_pos, SEEK_SET);
+    write(fd, &report, sizeof(Report));
+    write_pos=lseek(fd, 0, SEEK_CUR); 
+    lseek(fd, read_pos, SEEK_SET); //ne intoarcem pt urm bucla
+  }
+  if(ftruncate(fd, status_inainte.st_size-sizeof(Report))<0){ //taiem ultimul report ramas in plus la final
+    perror("Eroare la ftruncate");
+    exit(1);
+  }
+  else{
+    printf("Raportul %d a fost sters.\n", target_id);
+  }
+  struct stat status_dupa;
+  fstat(fd, &status_dupa);
+  printf("Dimensiune inainte: %ld, Dimensiune dupa: %ld\n", (long)status_inainte.st_size, (long)status_dupa.st_size);
+  close(fd);
 }
-void update_threshold(){
+void update_threshold(const char* district_id, const char* role, int value){
+  if(strcmp(role, "manager")!=0){
+    printf("Eroare! Doar rolul 'manager' poate actualiza threshold-ul.\n");
+    exit(1);
+  }
+  char cale_fisier[256];
+  sprintf(cale_fisier, "%s/district.cfg", district_id);
+  struct stat status;
+  if(stat(cale_fisier, &status)<0){
+    perror("Eroare la verificarea fisierului district.cfg");
+    return;
+  }
+  if((status.st_mode&0777)!=0640){ //pt a izola ult 3 cifre octale + verificat daca permisiunile sunt 640
+    printf("Eroare! Permisiunile fisierului %s nu sunt 640.\n", cale_fisier);
+    exit(1);
+  }
+  int fd=open(cale_fisier, O_WRONLY | O_TRUNC);
+  if(fd<0){
+    perror("Nu s-a putut deschide district.cfg pentru scriere");
+    exit(1);
+  }
+  char buffer[32];
+  int len=sprintf(buffer, "%d\n", value);
+  if(write(fd, buffer, len)!=len){
+    perror("Eroare la scrierea noului threshold");
+    exit(1);
+  }
+  else{
+    printf("Threshold actualizat la %d pentru districtul '%s'.\n", value, district_id);
+  }
+  close(fd);
 }
-void filter(){
-}*/
+void filter(const char* district_id, const char* role, const char** conditions, int nr_conditions){
+  char cale_fisier[256];
+  sprintf(cale_fisier, "%s/reports.dat", district_id);
+  if(!verify_permissions(cale_fisier, role, 1, 0)){ //pt citire
+    printf("Eroare! Rolul '%s' nu are permisiuni de citire pentru filtrare.\n", role);
+    exit(1);
+  }
+  int fd=open(cale_fisier, O_RDONLY);
+  if(fd<0){
+    perror("Eroare la deschiderea reports.dat pentru filtrare");
+    exit(1);
+  }
+  Report report;
+  int gasit=0;
+  while(read(fd, &report, sizeof(Report)) == sizeof(Report)){
+    int verifica_conditiile=1;
+    for(int i=0;i<nr_conditions;i++){
+      char field[32], op[8], value_str[64];
+      if(!parse_condition(conditions[i], field, op, value_str)){
+        verifica_conditiile=0;
+        break;
+      }
+      if(!match_condition(&report, field, op, value_str)){
+        verifica_conditiile = 0;
+        break;
+      }
+    }
+    if(verifica_conditiile){
+      gasit++;
+      printf("ID: %d | Inspector: %s | Categorie: %s | Severitate: %d\n", report.id, report.inspector, report.category, (int)report.level);
+    }
+  }
+  if(gasit == 0){
+    printf("Niciun raport nu a corespuns criteriilor de filtrare.\n");
+  }else{
+    printf("\nTotal rapoarte gasite: %d\n", gasit);
+  }
+  close(fd);
+}
+void check_all_symlinks() {
+  DIR *dir;
+  struct dirent *entry;
+  struct stat link_status, target_status;
+  dir=opendir(".");
+  if(dir==NULL){
+    perror("Eroare la scanarea directorului curent");
+    return; 
+  }
+  while((entry = readdir(dir))!=NULL){
+    if(strncmp(entry->d_name, "active_reports-", 15) == 0){
+      if(lstat(entry->d_name, &link_status) == 0){
+	if(S_ISLNK(link_status.st_mode)){
+	  if(stat(entry->d_name, &target_status)<0){
+	    printf("Symlink-ul '%s' este dangling (tinta nu exista)!\n", entry->d_name);
+	  }
+	}
+      }
+    }
+  }
+  closedir(dir);
+}
 int main(int argc, const char** argv){
   const char* role=NULL;
   const char* user=NULL;
@@ -333,7 +543,7 @@ int main(int argc, const char** argv){
       district_id=argv[++i];
       value=atoi(argv[++i]);
     }
-    else if(strcmp(argv[i],"--filter")==0 && i+2<argc){
+    else if(strcmp(argv[i],"--filter")==0 && i+1<argc){
       action="filter";
       district_id=argv[++i];
       while(i+1<argc && argv[i+1][0]!='-'){
@@ -345,8 +555,7 @@ int main(int argc, const char** argv){
     printf("Comanda incompleta!\n");
     exit(1);
   }
-  create_director(district_id);
-  create_symlink(district_id);
+  check_all_symlinks();
   if(strcmp(action, "list") == 0){
     list(district_id, role);
   }
@@ -358,7 +567,28 @@ int main(int argc, const char** argv){
     view(district_id, role, report_id);
   }
   else if(strcmp(action, "add") == 0){
-    printf("Add\n");
+    add(district_id, role, user);
+  }
+  else if(strcmp(action, "remove_report") == 0){
+    if(report_id == -1){
+      perror("Eroare! Lipseste ID-ul raportului.\n");
+      exit(1);
+    }
+    remove_report(district_id, role, report_id);
+  }
+  else if(strcmp(action, "update_threshold") == 0){
+    if(value == -1){
+      printf("Eroare! Lipseste valoarea pt threshold.\n");
+      exit(1);
+    }
+    update_threshold(district_id, role, value);
+  }
+  else if(strcmp(action, "filter") == 0){
+    if(nr_conditions == 0){
+      printf("Eroare! Lipsesc conditiile pt filtrare (minim una).\n");
+      exit(1);
+    }
+    filter(district_id, role, conditions, nr_conditions);
   }
   log_action(district_id, role, user, action);
   return 0;
