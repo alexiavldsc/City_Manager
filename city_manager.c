@@ -174,7 +174,7 @@ void create_director(const char* nume_director){
     exit(1);
   }
 }
-//functii cu AI - trebuie verificate/modificate
+//functii cu AI
 int parse_condition(const char* input, char* field, char* op, char* value){
   if(strlen(input)>=256){ //sa nu depasim dim buffer-ului
     printf("Eroare! Prea lungi conditiile filtrului.\n");
