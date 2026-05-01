@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <dirent.h>
 #include <errno.h>
+#include <sys/wait.h>
 typedef struct{
   float latitude;
   float longitude;
@@ -30,7 +31,7 @@ typedef struct{
 int verify_permissions(const char* cale_fisier, const char* role, int read, int write){
   struct stat status;
   if(stat(cale_fisier, &status)<0){
-    perror("Eroare status fisier\n");
+    perror("Eroare status fisier");
     exit(1);
   }
   if(strcmp(role, "manager")==0){ //testam permisiunile de user
@@ -126,8 +127,8 @@ void log_action(const char* district_id, const char* role, const char* user, con
   }
   int fd=open(cale_fisier, O_WRONLY | O_APPEND | O_CREAT, 0644);
   if(fd<0){
-    perror("Eroare la deschiderea fisierului logged_district.\n");
-    exit(1);
+    perror("Eroare la deschiderea fisierului logged_district");
+    return;
   }
   time_t timp_curent=time(NULL);
   char line[512];
@@ -138,7 +139,7 @@ void log_action(const char* district_id, const char* role, const char* user, con
 void create_director(const char* nume_director){
   if(mkdir(nume_director, 0750)<0){
     if(errno!=EEXIST){
-      perror("Eroare la crearea directorului.\n");
+      perror("Eroare la crearea directorului");
       exit(1);
     }
   }
@@ -150,7 +151,7 @@ void create_director(const char* nume_director){
     close(fd_reports);
     chmod(cale_fisier,0664);
   }else{
-    perror("Eroare la crearea fisierului reports.dat\n");
+    perror("Eroare la crearea fisierului reports.dat");
     exit(1);
   }
   sprintf(cale_fisier, "%s/district.cfg", nume_director);
@@ -160,7 +161,7 @@ void create_director(const char* nume_director){
     chmod(cale_fisier,0640);
   }
   else{
-    perror("Eroare la crearea fisierului district.cfg\n");
+    perror("Eroare la crearea fisierului district.cfg");
     exit(1);
   }
   sprintf(cale_fisier, "%s/logged_district", nume_director);
@@ -170,7 +171,7 @@ void create_director(const char* nume_director){
     chmod(cale_fisier,0644);
   }
   else{
-    perror("Eroare la crearea fisierului logged_district\n");
+    perror("Eroare la crearea fisierului logged_district");
     exit(1);
   }
 }
@@ -248,7 +249,7 @@ void add(const char* district_id, const char* role, const char* user){
   int fd=open(cale_fisier, O_RDWR | O_APPEND);
   if(fd<0){
     perror("Eroare la deschiderea reports.dat");
-    exit(1);
+    return;
   }
   //luam id-ul ultimului raport +1 si il consideram id-ul nou
   struct stat fisier_status;
@@ -283,7 +284,7 @@ void add(const char* district_id, const char* role, const char* user){
   lseek(fd, 0, SEEK_END); //scriem la sfarsit
   if(write(fd, &report, sizeof(Report)) != sizeof(Report)){
     perror("Eroare la scrierea raportului");
-    exit(1);
+    return;
   }
   else{
     printf("Raport adaugat! ID: %d\n", id_nou);
@@ -300,7 +301,7 @@ void list(const char* district_id, const char* role){
   struct stat fisier_status; //pt statusul fisierului
   if(stat(cale_fisier, &fisier_status)<0){
     perror("Eroare la stat() pt reports.dat");
-    exit(1);
+    return;
   }
   char permisiuni[10];
   set_mode(fisier_status.st_mode, permisiuni);
@@ -312,7 +313,7 @@ void list(const char* district_id, const char* role){
   int fd=open(cale_fisier, O_RDONLY);
   if(fd<0){
     perror("Nu s-a putut deschide reports.dat");
-    exit(1);
+    return;
   }
   Report report;
   while(read(fd, &report, sizeof(Report)) == sizeof(Report)){
@@ -364,12 +365,12 @@ void remove_report(const char* district_id, const char* role, int target_id){
   }
   if(!verify_permissions(cale_fisier, role, 1, 1)){
     printf("Eroare! Rolul '%s' nu are permisiuni rw pe %s.\n", role, cale_fisier);
-    exit(1);
+    return;
   }
   int fd=open(cale_fisier, O_RDWR);
   if(fd<0){
     perror("Nu s-a putut deschide reports.dat pentru stergere");
-    exit(1);
+    return;
   }
   struct stat status_inainte; //memoram dimensiunea initiala
   fstat(fd, &status_inainte);
@@ -401,7 +402,7 @@ void remove_report(const char* district_id, const char* role, int target_id){
   }
   if(ftruncate(fd, status_inainte.st_size-sizeof(Report))<0){ //taiem ultimul report ramas in plus la final
     perror("Eroare la ftruncate");
-    exit(1);
+    return;
   }
   else{
     printf("Raportul %d a fost sters.\n", target_id);
@@ -414,7 +415,7 @@ void remove_report(const char* district_id, const char* role, int target_id){
 void update_threshold(const char* district_id, const char* role, int value){
   if(strcmp(role, "manager")!=0){
     printf("Eroare! Doar rolul 'manager' poate actualiza threshold-ul.\n");
-    exit(1);
+    return;
   }
   char cale_fisier[256];
   sprintf(cale_fisier, "%s/district.cfg", district_id);
@@ -425,18 +426,18 @@ void update_threshold(const char* district_id, const char* role, int value){
   }
   if((status.st_mode&0777)!=0640){ //pt a izola ult 3 cifre octale + verificat daca permisiunile sunt 640
     printf("Eroare! Permisiunile fisierului %s nu sunt 640.\n", cale_fisier);
-    exit(1);
+    return;
   }
   int fd=open(cale_fisier, O_WRONLY | O_TRUNC);
   if(fd<0){
     perror("Nu s-a putut deschide district.cfg pentru scriere");
-    exit(1);
+    return;
   }
   char buffer[32];
   int len=sprintf(buffer, "%d\n", value);
   if(write(fd, buffer, len)!=len){
     perror("Eroare la scrierea noului threshold");
-    exit(1);
+    return;
   }
   else{
     printf("Threshold actualizat la %d pentru districtul '%s'.\n", value, district_id);
@@ -448,12 +449,12 @@ void filter(const char* district_id, const char* role, const char** conditions, 
   sprintf(cale_fisier, "%s/reports.dat", district_id);
   if(!verify_permissions(cale_fisier, role, 1, 0)){ //pt citire
     printf("Eroare! Rolul '%s' nu are permisiuni de citire pentru filtrare.\n", role);
-    exit(1);
+    return;
   }
   int fd=open(cale_fisier, O_RDONLY);
   if(fd<0){
     perror("Eroare la deschiderea reports.dat pentru filtrare");
-    exit(1);
+    return;
   }
   Report report;
   int gasit=0;
@@ -504,6 +505,49 @@ void check_all_symlinks() {
   }
   closedir(dir);
 }
+void remove_district(const char* district_id, const char* role, const char* user){
+  if(strcmp(role, "manager") != 0){
+    printf("Rolul '%s' nu are voie sa apeleze comanda asta! Doar manager-ul poate!\n", role);
+    exit(1);
+  }
+  if(strchr(district_id,'/') != NULL || strstr(district_id, "..") != NULL || strlen(district_id) == 0 || strcmp(district_id, ".") == 0){
+    printf("Nume de district invalid (%s) !\n", district_id);
+    exit(1);
+  }
+  struct stat st;
+  if(stat(district_id, &st)<0){
+    printf("Districtul '%s' nu exista!\n", district_id);
+    return;
+  }
+  log_action(district_id, role, user, "remove_district");
+  pid_t pid=fork();
+  if(pid<0){
+    perror("Eroare la fork");
+    exit(1);
+  }
+  if(pid == 0){ //copil
+    execlp("rm", "rm", "-rf", district_id, NULL);
+    perror("Eroare la exec rm");
+    exit(1);
+  }
+  else{
+    //parinte
+    int status;
+    waitpid(pid, &status, 0);
+    if(!WIFEXITED(status) || WEXITSTATUS(status) != 0){
+      printf("Eroare: rm -rf nu s-a executat corect!\n");
+      return;
+    }
+  }
+  char nume_symlink[256];
+  snprintf(nume_symlink, sizeof(nume_symlink), "active_reports-%s", district_id);
+  if(unlink(nume_symlink) == 0){
+    printf("Symlink-ul '%s' a fost sters!\n", nume_symlink);
+  }
+  else{
+    perror("Eroare la stergerea symlink-ului");
+  }
+}
 int main(int argc, const char** argv){
   const char* role=NULL;
   const char* user=NULL;
@@ -550,6 +594,10 @@ int main(int argc, const char** argv){
 	conditions[nr_conditions++]=argv[++i];
       }
     }
+    else if(strcmp(argv[i],"--remove_district")==0 && i+1<argc){
+      action="remove_district";
+      district_id=argv[++i];
+    }
   }
   if(!role || !user || !action || !district_id){
     printf("Comanda incompleta!\n");
@@ -571,7 +619,7 @@ int main(int argc, const char** argv){
   }
   else if(strcmp(action, "remove_report") == 0){
     if(report_id == -1){
-      perror("Eroare! Lipseste ID-ul raportului.\n");
+      printf("Eroare! Lipseste ID-ul raportului.\n");
       exit(1);
     }
     remove_report(district_id, role, report_id);
@@ -590,6 +638,11 @@ int main(int argc, const char** argv){
     }
     filter(district_id, role, conditions, nr_conditions);
   }
-  log_action(district_id, role, user, action);
+  else if(strcmp(action, "remove_district") == 0){
+    remove_district(district_id, role, user);
+  }
+  if(strcmp(action, "remove_district") != 0){
+    log_action(district_id, role, user, action);
+  }
   return 0;
 }
