@@ -10,6 +10,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <sys/wait.h>
+#include <signal.h>
 typedef struct{
   float latitude;
   float longitude;
@@ -232,6 +233,59 @@ int match_condition(Report* r, const char* field, const char* op, const char* va
   }
   return 0;
 }
+int notify_monitor(const char* district_id, const char* role, const char* user){
+  char cale_log[256];
+  snprintf(cale_log, sizeof(cale_log), "%s/logged_district", district_id);
+  int fd=open(".monitor_pid", O_RDONLY);
+  if(fd<0){
+    // scriem direct, fara log_action
+    int lfd=open(cale_log, O_WRONLY|O_APPEND|O_CREAT, 0644);
+    if(lfd>=0){
+      char msg[512];
+      int len=snprintf(msg, sizeof(msg), "%ld\t%s\t%s\tadd - monitorul nu a putut fi notificat (fisier .monitor_pid lipsa)\n", (long)time(NULL), user, role);
+      write(lfd, msg, len);
+      close(lfd);
+    }
+    return 0;
+  }
+  char buf[32];
+  memset(buf, 0, sizeof(buf));
+  int n=read(fd, buf, sizeof(buf)-1);
+  close(fd);
+  char msg[512];
+  int lfd=open(cale_log, O_WRONLY|O_APPEND|O_CREAT, 0644);
+  if(n<=0){
+    if(lfd>=0){
+      int len=snprintf(msg,sizeof(msg),"%ld\t%s\t%s\tadd - monitorul nu a putut fi notificat (fisier .monitor_pid gol)\n",(long)time(NULL),user,role);
+      write(lfd,msg,len);
+      close(lfd);
+    }
+    return 0;
+  }
+  pid_t monitor_pid=(pid_t)atoi(buf);
+  if(monitor_pid<=0){
+    if(lfd>=0){
+      int len=snprintf(msg,sizeof(msg),"%ld\t%s\t%s\tadd - monitorul nu a putut fi notificat (PID invalid)\n",(long)time(NULL),user,role);
+      write(lfd,msg,len);
+      close(lfd);
+    }
+    return 0;
+  }
+  if(kill(monitor_pid, SIGUSR1)<0){
+    if(lfd>=0){
+      int len=snprintf(msg,sizeof(msg),"%ld\t%s\t%s\tadd - monitorul nu a putut fi notificat (kill SIGUSR1 a esuat)\n",(long)time(NULL),user,role);
+      write(lfd,msg,len);
+      close(lfd);
+    }
+    return 0;
+  }
+  if(lfd>=0){
+    int len=snprintf(msg,sizeof(msg),"%ld\t%s\t%s\tadd - monitorul a fost notificat cu succes (SIGUSR1 trimis)\n",(long)time(NULL),user,role);
+    write(lfd,msg,len);
+    close(lfd);
+  }
+  return 1;
+}
 void add(const char* district_id, const char* role, const char* user){
   char cale_fisier[256];
   sprintf(cale_fisier, "%s/reports.dat", district_id);
@@ -284,12 +338,14 @@ void add(const char* district_id, const char* role, const char* user){
   lseek(fd, 0, SEEK_END); //scriem la sfarsit
   if(write(fd, &report, sizeof(Report)) != sizeof(Report)){
     perror("Eroare la scrierea raportului");
+    close(fd);
     return;
   }
   else{
     printf("Raport adaugat! ID: %d\n", id_nou);
   }
   close(fd);
+  notify_monitor(district_id, role, user);
 }
 void list(const char* district_id, const char* role){
   char cale_fisier[256];
@@ -641,7 +697,7 @@ int main(int argc, const char** argv){
   else if(strcmp(action, "remove_district") == 0){
     remove_district(district_id, role, user);
   }
-  if(strcmp(action, "remove_district") != 0){
+  if(strcmp(action, "remove_district") != 0 && strcmp(action, "add") != 0){
     log_action(district_id, role, user, action);
   }
   return 0;
