@@ -1,4 +1,6 @@
-# Documentatie AI Usage – Faza 1 & Faza 2
+# Documentatie AI Usage
+
+# Faza 1
 
 ## Ce tool am folosit
 Gemini
@@ -35,3 +37,11 @@ Gemini a generat o functie bazata pe blocuri de tip if - else if, care compara u
 **Ce am invatat:**
 1. Cum sa compar tipuri diferite (int, string, time_t) dintr-o functie generica
 2. Importanta adaugarii unui mecanism de verificare in caz ca utilizatorul nu introduce argumentele corect sau nu sunt optiuni valabile.
+
+# Faza 2
+
+Pentru faza 2, am folosit AI-ul pentru a intelege concepte si functii noi de sistem. L-am folosit pentru:
+1. Semnale: ca sa inteleg cum functioneaza structura sigaction pentru a prinde semnalele.
+2. Procese: am avut nevoie de niste explicatii despre cum functioneaza sincronizarea dintre procesul parinte si copil la comanda rm -rf si cum sa verific daca stergerea s-a terminat cu succes folosind WIFEXITED.
+3. Trimiterea de semnale: am folosit AI-ul pentru a intelege cum se foloseste functia kill() si cum trebuie tratate erorile in cazul in care semnalul nu poate fi trimis.
+
