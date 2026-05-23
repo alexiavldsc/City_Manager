@@ -28,7 +28,7 @@ static void hub_mon(){ //ruleaza in procesul copil
   }
   if(mon_pid == 0){
     close(mon_pipe[0]); //nu citim din pipe
-    if(dup2(mon_pipe[1], STDOUT_FILENO)<0){ //stdout->pipe
+    if(dup2(mon_pipe[1], STDOUT_FILENO)<0){
       perror("dup2 esuat in monitor");
       _exit(1);
     }
