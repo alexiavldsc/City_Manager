@@ -127,8 +127,8 @@ static void calculate_scores(char* args){
     if(pids[i] == 0){ //copil
       close(pipes[i][0]);
       if(dup2(pipes[i][1], STDOUT_FILENO)<0){
-	perror("dup2 esuat in calculate_scores");
-	_exit(1);
+        perror("dup2 esuat in calculate_scores");
+        _exit(1);
       }
       close(pipes[i][1]);
       execl("./scorer", "scorer", districts[i], NULL);
@@ -154,23 +154,23 @@ static void calculate_scores(char* args){
   }
 }
 static void stop_monitor(){
-    if(hub_mon_pid <= 0 || kill(hub_mon_pid, 0) != 0){
-        printf("Monitorul nu ruleaza.\n");
-        return;
+  if(hub_mon_pid <= 0 || kill(hub_mon_pid, 0) != 0){
+    printf("Monitorul nu ruleaza.\n");
+    return;
+  }
+  int fd=open(".monitor_pid", O_RDONLY);
+  if(fd>=0){
+    char buf[32]={0};
+    read(fd, buf, sizeof(buf)-1);
+    close(fd);
+    pid_t mon_pid=(pid_t)atoi(buf);
+    if(mon_pid>0 && kill(mon_pid, 0) == 0){
+      kill(mon_pid, SIGINT);
     }
-    int fd=open(".monitor_pid", O_RDONLY);
-    if(fd>=0){
-        char buf[32]={0};
-        read(fd, buf, sizeof(buf)-1);
-        close(fd);
-        pid_t mon_pid=(pid_t)atoi(buf);
-        if(mon_pid>0 && kill(mon_pid, 0) == 0){
-            kill(mon_pid, SIGINT);
-        }
-    }
-    waitpid(hub_mon_pid, NULL, 0);
-    hub_mon_pid=-1;
-    printf("Monitor oprit.\n");
+  }
+  waitpid(hub_mon_pid, NULL, 0);
+  hub_mon_pid=-1;
+  printf("Monitor oprit.\n");
 }
 int main() {
   char line[512];
